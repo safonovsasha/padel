@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime
 
 BOT_TOKEN = "8654397067:AAHQGslRg9urBjp2okusCtgCkFx9xbrgtY4"
-CHAT_ID = "8654397067"
+CHAT_ID = "412895587"
 CHECK_INTERVAL = 60
 
 VENUES = {
