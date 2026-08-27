@@ -52,11 +52,7 @@ editing_day = {}  # chat_id -> weekday
 
 def is_active_time():
     now = datetime.now(MSK)
-    wd = now.weekday()
-    hours = schedule.get(wd)
-    if not hours:
-        return False
-    return hours[0] <= now.hour < hours[1]
+    return 7 <= now.hour < 23
 
 
 def schedule_text():
@@ -92,16 +88,12 @@ def build_main_menu():
 
 
 def main_menu_text():
-    now = datetime.now(MSK)
-    wd = now.weekday()
-    h = schedule.get(wd)
-    time_info = f"{h[0]:02d}:00–{h[1]:02d}:00" if h else "сегодня не ищем"
     active = "🟢 Активен" if is_running and is_active_time() else ("🟡 Запущен (вне времени)" if is_running else "😴 Остановлен")
     names = ", ".join(VENUES[v] for v in monitoring) if monitoring else "не выбрано"
     return (
         f"🎾 <b>Падел-бот</b> | {active}\n"
         f"Площадки: {names}\n"
-        f"Сегодня ищу: {time_info}\n\n"
+        f"Активен: 07:00–23:00 каждый день\n\n"
         "Выбери площадки → нажми Старт:"
     )
 
