@@ -16,6 +16,8 @@ VENUES = {
     15: "🎾 Римская",
 }
 
+EXCLUDED_KEYWORDS = ["сайкл", "велосипед", "cycle"]
+
 BOOKING_URL = "https://outdoor.sport.mos.ru/#venues-events"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -23,6 +25,7 @@ monitoring = set()
 last_event_ids = {}
 is_running = False
 update_offset = 0
+excluded_event_ids = set()  # event_id сайкла и других исключений
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15",
@@ -35,6 +38,28 @@ HEADERS = {
 def is_active_time():
     now = datetime.now(MSK)
     return 7 <= now.hour < 23
+
+
+async def load_excluded_events():
+    """Загружает event_id которые нужно исключить (сайкл и др.)"""
+    global excluded_event_ids
+    for venue_id in VENUES:
+        try:
+            url = f"https://outdoor.sport.mos.ru/_b/booking/event-cards?venue_id={venue_id}"
+            async with httpx.AsyncClient(headers=HEADERS) as client:
+                resp = await client.get(url, timeout=10)
+                if resp.status_code != 200:
+                    continue
+                cards = resp.json().get("data", [])
+                for card in cards:
+                    title = card.get("title", "").lower()
+                    if any(kw in title for kw in EXCLUDED_KEYWORDS):
+                        ids = card.get("events", [])
+                        excluded_event_ids.update(ids)
+                        logging.info(f"Исключаю '{card['title'].strip()}' ({len(ids)} событий) из venue {venue_id}")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки event-cards для venue {venue_id}: {e}")
+    logging.info(f"Всего исключено event_id: {len(excluded_event_ids)}")
 
 
 async def send_message(text: str, reply_markup=None):
@@ -90,7 +115,10 @@ async def get_bookable(venue_id: int):
     async with httpx.AsyncClient(headers=HEADERS) as client:
         resp = await client.get(url, timeout=10)
         if resp.status_code == 200:
-            return resp.json().get("bookable_event_ids", [])
+            all_ids = resp.json().get("bookable_event_ids", [])
+            # Фильтруем исключённые события
+            filtered = [eid for eid in all_ids if eid not in excluded_event_ids]
+            return filtered
     return None
 
 
@@ -201,6 +229,7 @@ async def check_slots():
 
 async def main():
     logging.info("Бот запущен")
+    await load_excluded_events()
     await send_message("🤖 Бот запущен! Напиши /start чтобы выбрать площадки.")
     await asyncio.gather(poll_updates(), check_slots())
 
