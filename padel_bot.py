@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import httpx
-from datetime import datetime, time
+from datetime import datetime
 import pytz
 
 BOT_TOKEN = "8654397067:AAHQGslRg9urBjp2okusCtgCkFx9xbrgtY4"
@@ -24,21 +24,6 @@ last_event_ids = {}
 is_running = False
 update_offset = 0
 
-# Расписание по умолчанию: {weekday: (start_hour, end_hour)}
-# 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Вс
-DEFAULT_SCHEDULE = {
-    0: None,           # Пн — выходной
-    1: (18, 20),       # Вт
-    2: (18, 20),       # Ср
-    3: (18, 20),       # Чт
-    4: (18, 21),       # Пт
-    5: (10, 21),       # Сб
-    6: (10, 20),       # Вс
-}
-schedule = dict(DEFAULT_SCHEDULE)
-
-DAYS_RU = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15",
     "Accept": "*/*",
@@ -46,24 +31,10 @@ HEADERS = {
     "Accept-Language": "ru",
 }
 
-# Состояние редактирования расписания
-editing_day = {}  # chat_id -> weekday
-
 
 def is_active_time():
     now = datetime.now(MSK)
     return 7 <= now.hour < 23
-
-
-def schedule_text():
-    lines = []
-    for wd in range(7):
-        h = schedule.get(wd)
-        if h:
-            lines.append(f"{DAYS_RU[wd]}: {h[0]:02d}:00–{h[1]:02d}:00")
-        else:
-            lines.append(f"{DAYS_RU[wd]}: —")
-    return "\n".join(lines)
 
 
 async def send_message(text: str, reply_markup=None):
@@ -83,53 +54,18 @@ def build_main_menu():
         {"text": "▶️ Старт", "callback_data": "start_monitor"},
         {"text": "⏹ Стоп", "callback_data": "stop_monitor"},
     ])
-    buttons.append([{"text": "🕐 Расписание", "callback_data": "show_schedule"}])
     return {"inline_keyboard": buttons}
 
 
 def main_menu_text():
-    active = "🟢 Активен" if is_running and is_active_time() else ("🟡 Запущен (вне времени)" if is_running else "😴 Остановлен")
+    active = "🟢 Активен" if is_running and is_active_time() else ("🟡 Ждёт 07:00–23:00" if is_running else "😴 Остановлен")
     names = ", ".join(VENUES[v] for v in monitoring) if monitoring else "не выбрано"
     return (
         f"🎾 <b>Падел-бот</b> | {active}\n"
         f"Площадки: {names}\n"
-        f"Активен: 07:00–23:00 каждый день\n\n"
+        f"Работает: 07:00–23:00 каждый день\n\n"
         "Выбери площадки → нажми Старт:"
     )
-
-
-def build_schedule_menu():
-    buttons = []
-    for wd in range(7):
-        h = schedule.get(wd)
-        label = f"{h[0]:02d}:00–{h[1]:02d}:00" if h else "выкл"
-        buttons.append([{"text": f"{DAYS_RU[wd]}: {label}", "callback_data": f"edit_day_{wd}"}])
-    buttons.append([{"text": "↩️ Назад", "callback_data": "back_main"}])
-    return {"inline_keyboard": buttons}
-
-
-def build_day_edit_menu(wd):
-    """Меню редактирования одного дня"""
-    buttons = []
-    # Варианты времени
-    options = [
-        None,
-        (10, 20), (10, 21), (10, 22),
-        (12, 20), (12, 21), (12, 22),
-        (18, 20), (18, 21), (18, 22),
-    ]
-    current = schedule.get(wd)
-    for opt in options:
-        if opt is None:
-            label = "⛔️ Выключить"
-            val = "off"
-        else:
-            label = f"{opt[0]:02d}:00–{opt[1]:02d}:00"
-            val = f"{opt[0]}_{opt[1]}"
-        check = " ✅" if opt == current else ""
-        buttons.append([{"text": label + check, "callback_data": f"settime_{wd}_{val}"}])
-    buttons.append([{"text": "↩️ Назад", "callback_data": "show_schedule"}])
-    return {"inline_keyboard": buttons}
 
 
 async def edit_message(chat_id, message_id, text, markup):
@@ -141,11 +77,11 @@ async def edit_message(chat_id, message_id, text, markup):
         )
 
 
-async def answer_callback(callback_id: str, text: str = ""):
+async def answer_callback(callback_id: str):
     async with httpx.AsyncClient() as client:
         await client.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-            json={"callback_query_id": callback_id, "text": text},
+            json={"callback_query_id": callback_id},
         )
 
 
@@ -159,7 +95,7 @@ async def get_bookable(venue_id: int):
 
 
 async def poll_updates():
-    global update_offset, is_running, monitoring, schedule
+    global update_offset, is_running, monitoring
 
     while True:
         try:
@@ -185,8 +121,7 @@ async def poll_updates():
                     elif text == "/status":
                         if is_running:
                             names = ", ".join(VENUES[v] for v in monitoring)
-                            active = "активен" if is_active_time() else "вне времени поиска"
-                            await send_message(f"{'✅' if is_active_time() else '🟡'} Слежу за: {names}\nСтатус: {active}")
+                            await send_message(f"{'✅' if is_active_time() else '🟡'} Слежу за: {names}")
                         else:
                             await send_message("😴 Не запущен. /start — меню.")
 
@@ -212,40 +147,13 @@ async def poll_updates():
                             is_running = True
                             await edit_message(chat_id, message_id, main_menu_text(), build_main_menu())
                             names = ", ".join(VENUES[v] for v in monitoring)
-                            await send_message(f"✅ Запущен!\nСлежу за: {names}\n\n📅 Расписание:\n{schedule_text()}")
+                            await send_message(f"✅ Запущен! Слежу за: {names}")
 
                     elif data == "stop_monitor":
                         is_running = False
                         monitoring.clear()
                         await edit_message(chat_id, message_id, main_menu_text(), build_main_menu())
                         await send_message("⏹ Остановлен.")
-
-                    elif data == "show_schedule":
-                        await edit_message(chat_id, message_id,
-                            f"🕐 <b>Расписание поиска</b>\nНажми день чтобы изменить:\n\n{schedule_text()}",
-                            build_schedule_menu())
-
-                    elif data == "back_main":
-                        await edit_message(chat_id, message_id, main_menu_text(), build_main_menu())
-
-                    elif data.startswith("edit_day_"):
-                        wd = int(data.split("_")[2])
-                        await edit_message(chat_id, message_id,
-                            f"🕐 <b>{DAYS_RU[wd]}</b> — выбери время поиска:",
-                            build_day_edit_menu(wd))
-
-                    elif data.startswith("settime_"):
-                        parts = data.split("_")
-                        wd = int(parts[1])
-                        val = "_".join(parts[2:])
-                        if val == "off":
-                            schedule[wd] = None
-                        else:
-                            h_start, h_end = int(parts[2]), int(parts[3])
-                            schedule[wd] = (h_start, h_end)
-                        await edit_message(chat_id, message_id,
-                            f"🕐 <b>{DAYS_RU[wd]}</b> — выбери время поиска:",
-                            build_day_edit_menu(wd))
 
         except Exception as e:
             logging.error(f"poll error: {e}")
@@ -261,8 +169,7 @@ async def check_slots():
             continue
 
         if not is_active_time():
-            now = datetime.now(MSK)
-            logging.info(f"Вне расписания ({now.strftime('%a %H:%M')}), пропускаю")
+            logging.info(f"Сплю до 07:00 ({datetime.now(MSK).strftime('%H:%M')})")
             continue
 
         for venue_id in list(monitoring):
@@ -294,11 +201,7 @@ async def check_slots():
 
 async def main():
     logging.info("Бот запущен")
-    await send_message(
-        "🤖 Бот запущен!\n\n"
-        f"📅 Расписание по умолчанию:\n{schedule_text()}\n\n"
-        "Напиши /start чтобы выбрать площадки."
-    )
+    await send_message("🤖 Бот запущен! Напиши /start чтобы выбрать площадки.")
     await asyncio.gather(poll_updates(), check_slots())
 
 
